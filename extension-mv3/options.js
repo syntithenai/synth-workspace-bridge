@@ -1,6 +1,9 @@
 /** Options page: browser-control test, host permission, pairing token, revoke. */
 
-const ORIGINS = ['https://*/*', 'http://localhost/*', 'http://127.0.0.1/*']
+// The manifest is the single list of provider origins. Keeping the request in
+// step with it means a new provider cannot be added in one place and forgotten
+// in the other.
+const ORIGINS = chrome.runtime.getManifest().optional_host_permissions || []
 
 const extensionId = document.getElementById('extension-id')
 const tokenEl = document.getElementById('token')
@@ -51,18 +54,20 @@ testBrowser.addEventListener('click', async () => {
   status('Testing…', '')
   let tabId
   try {
-    const tabs = (await chrome.tabs.query({})).filter(
-      (tab) => typeof tab.id === 'number' && /^https?:/i.test(tab.url || ''),
+    const targets = (await chrome.debugger.getTargets()).filter(
+      (candidate) =>
+        candidate.type === 'page' &&
+        typeof candidate.tabId === 'number' &&
+        /^https?:/i.test(candidate.url || ''),
     )
-    const tab =
-      tabs.find((candidate) => candidate.active) ||
-      tabs.find((candidate) => candidate.url && candidate.url !== 'about:blank') ||
-      tabs[0]
+    const active = await chrome.tabs.query({ active: true })
+    const activeIds = new Set(active.map((tab) => tab.id))
+    const tab = targets.find((candidate) => activeIds.has(candidate.tabId)) || targets[0]
     if (!tab) {
       status('Open an http(s) page in this browser first.', 'error')
       return
     }
-    tabId = tab.id
+    tabId = tab.tabId
     await chrome.debugger.attach({ tabId }, '1.3')
     const result = await chrome.debugger.sendCommand(
       { tabId },
@@ -71,7 +76,7 @@ testBrowser.addEventListener('click', async () => {
     )
     const title = result && result.result ? result.result.value : ''
     status(
-      `Browser control works: ${tabs.length} web tab${tabs.length === 1 ? '' : 's'} reachable${
+      `Browser control works: ${targets.length} web tab${targets.length === 1 ? '' : 's'} reachable${
         title ? `, active page “${String(title).slice(0, 80)}”` : ''
       }.`,
       'ok',

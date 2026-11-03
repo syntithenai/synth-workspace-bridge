@@ -4,9 +4,11 @@ Gives Synth Workspace control of your own browser and makes the extension the
 PWA's primary network egress for BYO model calls.
 
 - **Browser control.** The workspace can list, read, open, click, type,
-  screenshot and evaluate in your tabs through Chrome's debugger protocol — the
+  screenshot and navigate your tabs through Chrome's debugger protocol — the
   same mechanism DevTools uses. Actions run in the tab you are already signed
-  in to, and no tab is controlled until an action is requested.
+  in to, and no tab is controlled until an action is requested. There is no
+  "run this script" action: every expression the worker evaluates is a constant
+  in its own bundle.
 - **Model egress.** Provider requests leave through your own Chrome, need no
   CORS headers, and the API key is only ever in the in-memory headers of one
   request — never in `chrome.storage`, IndexedDB, localStorage, the Worker, or a
@@ -48,14 +50,14 @@ A page from any other origin cannot open either port.
 - The page opens
   `chrome.runtime.connect(extensionId, { name: 'synth-workspace-browser' })`
   and sends one `browser` frame:
-  `{ action, params: { target?, url?, query?, text?, script?, submit?, expected? } }`.
+  `{ action, params: { target?, url?, query?, text?, submit?, expected? } }`.
 - The service worker checks the pairing token, resolves the tab (explicit id,
   then the tab it last used, then the focused web tab), attaches
   `chrome.debugger` for that one action, runs it, and detaches.
-- Actions mirror the server's browser tools: element lookup by selector or
-  visible label, password-field refusal, `Input.insertText` typing with an
-  optional Enter, `Page.captureScreenshot`, and `Runtime.evaluate` with
-  `returnByValue` and `awaitPromise`.
+- Actions are a fixed set: element lookup by selector or visible label,
+  password-field refusal, `Input.insertText` typing with an optional Enter,
+  `Page.captureScreenshot`, and `Runtime.evaluate` of expressions compiled into
+  the worker. The page cannot supply a script.
 - Page text is returned to the workspace marked untrusted. Password and
   credential fields are never read or filled. A click may carry the text and
   href the user approved; if the page changed underneath, it returns `changed`
@@ -81,9 +83,12 @@ A page from any other origin cannot open either port.
 |---|---|
 | `storage` | The pairing token, kept in `chrome.storage.local`. |
 | `offscreen` | Keeps a provider response stream alive when the worker is suspended. |
-| `debugger` | Runs browser actions through the DevTools Protocol. |
-| `tabs` | Lists and resolves tabs; browser actions need tab ids and titles. |
-| Optional `https://*/*` + localhost | Provider fetches, granted on the Options page. Browser control does not use it. |
+| `debugger` | Runs browser actions through the DevTools Protocol, and supplies tab URLs/titles through `getTargets()` so the `tabs` permission is not needed. |
+| Optional provider origins | Provider fetches, granted on the Options page. The list is the model APIs in `manifest.json`; there is no wildcard. Browser control does not use it. |
+
+The deliberate omissions matter for review: no `tabs` (no browsing-history
+warning), no `<all_urls>`, no `scripting`, no `webRequest`, and no
+page-supplied code path.
 
 ## Revoking
 

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Synth Workspace Bridge — Privacy Policy</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+        margin: 0 auto;
+        max-width: 760px;
+        padding: 48px 20px 80px;
+        color: #1c1c1e;
+        background: #fff;
+      }
+      h1 { font-size: 28px; line-height: 1.2; margin: 0 0 4px; }
+      h2 { font-size: 18px; margin: 36px 0 8px; }
+      p, li { color: #3a3a3c; }
+      .updated { color: #8e8e93; font-size: 14px; margin-top: 0; }
+      code { background: #f2f2f7; border-radius: 4px; padding: 1px 5px; font-size: 14px; }
+      ul { padding-left: 22px; }
+      a { color: #0066cc; }
+      @media (prefers-color-scheme: dark) {
+        body { background: #0b1220; color: #e8eef9; }
+        p, li { color: #b8c3d6; }
+        code { background: #16213a; }
+        .updated { color: #7f8ba1; }
+        a { color: #6cb6ff; }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Synth Workspace Bridge — Privacy Policy</h1>
+    <p class="updated">Last updated: 4 November 2026</p>
+
+    <p>
+      The Synth Workspace Bridge extension (“the extension”) connects your
+      browser to a Synth Workspace deployment that you choose. This policy covers
+      the extension only. The Workspace deployment you pair with has its own data
+      handling, set by whoever operates it.
+    </p>
+    <p>Contact: <a href="mailto:syntithenai@gmail.com">syntithenai@gmail.com</a></p>
+
+    <h2>Summary</h2>
+    <ul>
+      <li>The extension has no servers of its own. It does not send data to the developer.</li>
+      <li>There is no analytics, telemetry, advertising, or crash reporting.</li>
+      <li>Two kinds of data move through the extension, and both go only to a destination you chose.</li>
+    </ul>
+
+    <h2>1. Pairing</h2>
+    <p>
+      The extension stores one thing: a random pairing token in
+      <code>chrome.storage.local</code>. The Workspace stores the same token
+      encrypted on your device and presents it with every request. The token
+      identifies the connection, not you. There is no account, email address, or
+      identity in the extension.
+    </p>
+    <p>
+      Revoking the token on the Options page, or uninstalling the extension,
+      deletes it.
+    </p>
+
+    <h2>2. Browser control</h2>
+    <p>
+      When you, or an assistant acting on your request, ask the Workspace to act
+      in a tab, the extension may read:
+    </p>
+    <ul>
+      <li>the tab's URL and title;</li>
+      <li>the page's visible text, links, and form-field labels;</li>
+      <li>a PNG screenshot of the visible tab.</li>
+    </ul>
+    <p>
+      It may also click an element, type into a non-password field, press Enter,
+      navigate to a URL, open, close, or activate a tab.
+    </p>
+    <p>
+      That data goes only to the paired Workspace origin —
+      <code>https://suite.synthfit.online</code> or a localhost development
+      origin. The extension does not store page content, and does not send it to
+      the developer or to any third party.
+    </p>
+    <p>Limits built into the extension:</p>
+    <ul>
+      <li>password fields are never read or filled;</li>
+      <li>the debugger is attached for one action and detached immediately afterwards;</li>
+      <li>browser-internal pages (<code>chrome://</code>), the Chrome Web Store, and other extensions cannot be controlled;</li>
+      <li>a click can be pinned to the text and link you approved, so a page that changed underneath is reported rather than clicked;</li>
+      <li>page text is treated as untrusted input by the Workspace.</li>
+    </ul>
+
+    <h2>3. Model requests (bring your own key)</h2>
+    <p>If you use the extension to route model calls, it handles:</p>
+    <ul>
+      <li>the request body and model name produced by your Workspace;</li>
+      <li>the provider API key you configured in the Workspace.</li>
+    </ul>
+    <p>
+      They go only to the model-provider endpoint you selected. The key exists
+      in memory for the duration of one request; the extension never writes it to
+      storage and never logs it. The extension does not otherwise receive your
+      chat history — it relays exactly the request the Workspace sends.
+    </p>
+    <p>
+      Providers process those requests under their own privacy policies. The
+      extension's provider allowlist is published in its
+      <code>manifest.json</code> and shown on the Options page.
+    </p>
+
+    <h2>4. What the extension does not do</h2>
+    <ul>
+      <li>It does not sell or share data for advertising or credit.</li>
+      <li>It does not use analytics, telemetry, or crash reporting.</li>
+      <li>It does not read tabs in the background. Nothing happens until an action is requested.</li>
+      <li>It does not download or execute remote code. Every expression it evaluates is a constant in its own bundle; the paired page cannot supply a script.</li>
+      <li>It does not read cookies, saved passwords, or browsing history.</li>
+    </ul>
+
+    <h2>5. Limited Use</h2>
+    <p>
+      The extension's use of data complies with the Chrome Web Store User Data
+      Policy, including the Limited Use requirements. Data is used only to
+      provide the extension's single purpose: connecting your browser to your own
+      Workspace so the Workspace can act through your signed-in tabs and route
+      model requests through your connection.
+    </p>
+
+    <h2>6. Retention</h2>
+    <p>
+      The extension retains only the pairing token, until you revoke it or
+      uninstall the extension. It retains no page content, model requests, or
+      provider keys.
+    </p>
+
+    <h2>7. Your controls</h2>
+    <ul>
+      <li><strong>Revoke pairing:</strong> Options page → Revoke. Every page is refused immediately.</li>
+      <li><strong>Revoke provider access:</strong> <code>chrome://extensions</code> → Details → Site access, or uninstall the extension.</li>
+      <li><strong>Remove everything:</strong> uninstalling the extension deletes its storage.</li>
+    </ul>
+
+    <h2>8. Children</h2>
+    <p>
+      The extension is not directed to children under 13 and does not knowingly
+      collect data from them.
+    </p>
+
+    <h2>9. Changes</h2>
+    <p>
+      Material changes will be noted in the release notes and reflected in the
+      date above.
+    </p>
+
+    <h2>10. Contact</h2>
+    <p>Questions: <a href="mailto:syntithenai@gmail.com">syntithenai@gmail.com</a></p>
+  </body>
+</html>

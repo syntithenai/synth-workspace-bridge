@@ -39,6 +39,7 @@
       </p>
       <ul>
         <li>No tab is controlled until an action is requested.</li>
+        <li>A fixed set of actions: list, open, read, describe, click, type, screenshot, close and activate. The page cannot ask the extension to run arbitrary code.</li>
         <li>Password fields are never filled.</li>
         <li>Actions still follow the assistant's approval setting in the workspace.</li>
       </ul>
@@ -51,11 +52,16 @@
     <section>
       <strong>2. Allow provider requests</strong>
       <p class="muted">
-        The extension only reaches https providers and localhost services. Chrome
-        asks once for the host permission. Browser control above does not need it.
+        The extension can only reach the model-provider APIs named in its
+        manifest: Anthropic, OpenAI, DeepSeek, Google Gemini, OpenRouter,
+        Together, Groq, Mistral, xAI, Fireworks, Cerebras, SambaNova, Nebius,
+        Hyperbolic, Perplexity, Cohere, Moonshot, MiniMax, Zhipu, DashScope,
+        Hugging Face, NVIDIA NIM, GitHub Models, Replicate, Azure OpenAI and
+        localhost servers such as Ollama and LM Studio. Granting the permission
+        contacts nothing by itself. Browser control above does not need it.
       </p>
       <div class="row">
-        <button id="grant" class="secondary">Grant network access</button>
+        <button id="grant" class="secondary">Grant provider access</button>
         <span id="grant-status" class="muted"></span>
       </div>
     </section>
@@ -74,6 +80,13 @@
       </div>
       <p id="saved" class="muted"></p>
     </section>
+
+    <p class="muted" style="margin-top: 24px">
+      Privacy policy:
+      <a href="https://syntithenai.github.io/synth-workspace-bridge/privacy.html"
+        >syntithenai.github.io/synth-workspace-bridge/privacy.html</a
+      >
+    </p>
 
     <script src="options.js"></script>
   </body>
