@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Synth Workspace Bridge</title>
+    <style>
+      body { font: 14px/1.5 system-ui, sans-serif; margin: 32px auto; max-width: 640px; padding: 0 16px; color: #1c1c1e; }
+      h1 { font-size: 18px; margin-bottom: 4px; }
+      p { color: #48484a; }
+      code { background: #f2f2f7; border-radius: 4px; padding: 2px 6px; word-break: break-all; }
+      section { border: 1px solid #d1d1d6; border-radius: 10px; padding: 16px; margin: 16px 0; }
+      button { font: inherit; padding: 6px 14px; border-radius: 8px; border: 1px solid #007aff; background: #007aff; color: white; cursor: pointer; }
+      button.secondary { background: white; color: #007aff; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+      .muted { color: #8e8e93; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Synth Workspace Bridge</h1>
+    <p>
+      Pair this extension with your Synth Workspace page. The pairing token lets
+      the extension trust that origin; it is not a provider key and nothing else
+      is stored here.
+    </p>
+
+    <section>
+      <strong>1. Allow provider requests</strong>
+      <p class="muted">
+        The extension only reaches https providers and localhost services. Chrome
+        asks once for the host permission.
+      </p>
+      <div class="row">
+        <button id="grant" class="secondary">Grant network access</button>
+        <span id="grant-status" class="muted"></span>
+      </div>
+    </section>
+
+    <section>
+      <strong>2. Pair with the workspace</strong>
+      <p class="muted">
+        Paste the extension id and token into Settings → Browser extension in
+        Synth Workspace. Pairing is one-time; regenerate to revoke old pages.
+      </p>
+      <div class="row"><span>Extension id</span> <code id="extension-id"></code></div>
+      <div class="row"><span>Pairing token</span> <code id="token">— none —</code></div>
+      <div class="row">
+        <button id="generate">Generate pairing token</button>
+        <button id="revoke" class="secondary">Revoke</button>
+      </div>
+      <p id="saved" class="muted"></p>
+    </section>
+
+    <script src="options.js"></script>
+  </body>
+</html>
