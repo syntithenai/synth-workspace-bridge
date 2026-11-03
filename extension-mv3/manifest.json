@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Synth Workspace Bridge",
   "version": "0.1.0",
-  "description": "Streams BYOK model calls from the Synth Workspace PWA through your own browser, so provider keys never reach a server. Phase 5 adds residential-IP web fetch, browser control and scheduling.",
+  "description": "Streams BYOK model calls from the Synth Workspace PWA through your own browser, so provider keys never reach a server.",
   "minimum_chrome_version": "116",
   "background": {
     "service_worker": "background.js"
