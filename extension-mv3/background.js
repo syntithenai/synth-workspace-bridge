@@ -630,6 +630,16 @@ function modelPort(port) {
   })
 }
 
+// One browser action at a time. Two pages (or two tabs) acting on the same tab
+// would otherwise race attach/detach and one of them would lose its session.
+let browserQueue = Promise.resolve()
+
+function enqueueBrowser(task) {
+  const run = browserQueue.then(task, task)
+  browserQueue = run.catch(() => undefined)
+  return run
+}
+
 function browserPort(port) {
   port.onMessage.addListener(async (message) => {
     if (!message || message.type !== 'browser' || typeof message.id !== 'string') return
@@ -645,7 +655,7 @@ function browserPort(port) {
       return
     }
     try {
-      const value = await runBrowserAction(message.action, message.params)
+      const value = await enqueueBrowser(() => runBrowserAction(message.action, message.params))
       post(port, { type: 'browser-result', id: message.id, ok: true, value })
     } catch (error) {
       post(port, {
