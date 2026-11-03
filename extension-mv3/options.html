@@ -11,8 +11,12 @@
       section { border: 1px solid #d1d1d6; border-radius: 10px; padding: 16px; margin: 16px 0; }
       button { font: inherit; padding: 6px 14px; border-radius: 8px; border: 1px solid #007aff; background: #007aff; color: white; cursor: pointer; }
       button.secondary { background: white; color: #007aff; }
+      button:disabled { opacity: .5; cursor: default; }
       .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
       .muted { color: #8e8e93; font-size: 12px; }
+      ul { margin: 8px 0 0; padding-left: 20px; color: #48484a; }
+      #browser-status.ok { color: #1a7f37; }
+      #browser-status.error { color: #c62828; }
     </style>
   </head>
   <body>
@@ -24,10 +28,31 @@
     </p>
 
     <section>
-      <strong>1. Allow provider requests</strong>
+      <strong>1. Enable browser control</strong>
+      <p class="muted">
+        When Synth Workspace asks, the extension reads or acts in the tab you have
+        open using Chrome's debugger protocol — the same mechanism DevTools uses.
+        Actions are limited to normal http(s) pages; <code>chrome://</code> pages,
+        the Web Store and other extensions are refused. Chrome shows a
+        “started debugging this browser” banner while an action runs and removes
+        it when the action finishes.
+      </p>
+      <ul>
+        <li>No tab is controlled until an action is requested.</li>
+        <li>Password fields are never filled.</li>
+        <li>Actions still follow the assistant's approval setting in the workspace.</li>
+      </ul>
+      <div class="row">
+        <button id="test-browser" class="secondary">Test browser control</button>
+        <span id="browser-status" class="muted"></span>
+      </div>
+    </section>
+
+    <section>
+      <strong>2. Allow provider requests</strong>
       <p class="muted">
         The extension only reaches https providers and localhost services. Chrome
-        asks once for the host permission.
+        asks once for the host permission. Browser control above does not need it.
       </p>
       <div class="row">
         <button id="grant" class="secondary">Grant network access</button>
@@ -36,7 +61,7 @@
     </section>
 
     <section>
-      <strong>2. Pair with the workspace</strong>
+      <strong>3. Pair with the workspace</strong>
       <p class="muted">
         Paste the extension id and token into Settings → Browser extension in
         Synth Workspace. Pairing is one-time; regenerate to revoke old pages.
