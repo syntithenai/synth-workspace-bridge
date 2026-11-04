@@ -29,6 +29,10 @@
 
 const MODEL_PORT_NAME = 'synth-workspace-model'
 const BROWSER_PORT_NAME = 'synth-workspace-browser'
+const MAIL_PORT_NAME = 'synth-workspace-mail'
+/** Registered by the native helper installer; see services/mail-helper. */
+const MAIL_HOST_NAME = 'online.synthfit.workspace_mail'
+const MAIL_ACTIONS = new Set(['load-contact-mail', 'search', 'read'])
 const DEBUG_PROTOCOL_VERSION = '1.3'
 
 const PAIR_PROTOCOL_VERSION = 1
@@ -951,11 +955,146 @@ function browserPort(port, origin) {
   })
 }
 
+function mailProblem(message) {
+  if (!MAIL_ACTIONS.has(message.action)) return 'unknown mail action'
+  const params = message.params
+  if (!params || typeof params !== 'object') return 'missing mail parameters'
+  if (typeof params.email !== 'string' || !params.email.trim()) return 'missing email address'
+  if (typeof params.appPassword !== 'string' || !params.appPassword) return 'missing app password'
+  return null
+}
+
+/**
+ * Relays one mail request to the native helper.
+ *
+ * The app password is passed straight through to the helper and never written
+ * to storage, notifications or logs. Only one result is accepted; whichever of
+ * result, native disconnect or page disconnect happens first wins.
+ */
+function mailPort(port, origin) {
+  port.onMessage.addListener(async (message) => {
+    if (!message || message.type !== 'mail' || typeof message.id !== 'string') return
+    if (!(await portAllowed(origin, message.token))) {
+      post(port, {
+        type: 'mail-result',
+        id: message.id,
+        ok: false,
+        code: 'extension_unavailable',
+        message: 'This page is not paired.',
+      })
+      return
+    }
+    const problem = mailProblem(message)
+    if (problem) {
+      post(port, {
+        type: 'mail-result',
+        id: message.id,
+        ok: false,
+        code: 'invalid_input',
+        message: problem,
+      })
+      return
+    }
+
+    let native = null
+    let settled = false
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      try {
+        if (native) native.disconnect()
+      } catch {
+        // Already gone.
+      }
+      post(port, result)
+    }
+
+    try {
+      native = chrome.runtime.connectNative(MAIL_HOST_NAME)
+    } catch (error) {
+      finish({
+        type: 'mail-result',
+        id: message.id,
+        ok: false,
+        code: 'extension_unavailable',
+        message: `The mail helper is not installed (${errorText(error)}).`,
+      })
+      return
+    }
+    if (!native) {
+      finish({
+        type: 'mail-result',
+        id: message.id,
+        ok: false,
+        code: 'extension_unavailable',
+        message: 'The mail helper is not installed.',
+      })
+      return
+    }
+
+    native.onMessage.addListener((reply) => {
+      if (!reply || reply.type !== 'mail-result' || reply.id !== message.id) return
+      if (reply.ok) {
+        finish({ type: 'mail-result', id: message.id, ok: true, value: reply.value })
+      } else {
+        finish({
+          type: 'mail-result',
+          id: message.id,
+          ok: false,
+          code: reply.code || 'upstream',
+          message: reply.message || 'The mail helper failed.',
+        })
+      }
+    })
+    native.onDisconnect.addListener(() => {
+      const lastError = chrome.runtime.lastError
+      finish({
+        type: 'mail-result',
+        id: message.id,
+        ok: false,
+        code: 'extension_unavailable',
+        message:
+          lastError && lastError.message
+            ? lastError.message
+            : 'The mail helper exited before answering.',
+      })
+    })
+    port.onDisconnect.addListener(() => {
+      if (settled) return
+      settled = true
+      try {
+        native.disconnect()
+      } catch {
+        // Already gone.
+      }
+    })
+
+    try {
+      native.postMessage({
+        type: 'mail',
+        version: 1,
+        id: message.id,
+        action: message.action,
+        params: message.params,
+      })
+    } catch (error) {
+      finish({
+        type: 'mail-result',
+        id: message.id,
+        ok: false,
+        code: 'extension_unavailable',
+        message: errorText(error),
+      })
+    }
+  })
+}
+
 chrome.runtime.onConnectExternal.addListener((port) => {
   // `sender` is browser-supplied for external ports; never trust the page.
   const origin = normalizeOrigin(port.sender && port.sender.origin)
   if (port.name === MODEL_PORT_NAME) modelPort(port, origin)
   else if (port.name === BROWSER_PORT_NAME) browserPort(port, origin)
+  else if (port.name === MAIL_PORT_NAME) mailPort(port, origin)
 })
 
 function handleExternalMessage(message, origin) {

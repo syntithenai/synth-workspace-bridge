@@ -13,6 +13,11 @@ PWA's primary network egress for BYO model calls.
   CORS headers, and the API key is only ever in the in-memory headers of one
   request — never in `chrome.storage`, IndexedDB, localStorage, the Worker, or a
   log.
+- **Gmail for contact research.** A page cannot open an IMAP socket, so the
+  extension relays one request to a small native helper
+  ([`services/mail-helper`](../services/mail-helper/README.md)) that reads the
+  mailbox over TLS. It is read-only, the app password is passed straight
+  through for that one request, and nothing is stored by the extension.
 
 **Canonical source:** <https://github.com/syntithenai/synth-workspace-bridge>.
 This folder is the working copy; publish changes there with
@@ -35,6 +40,29 @@ This folder is the working copy; publish changes there with
    the extension and offers **Pair extension**. Click it, then **Allow** in the
    Chrome notification. There is no id or token to copy.
 7. Use **Test browser control** in the workspace to confirm the pairing.
+
+### Gmail research helper (optional)
+
+Browser-local contact research reads Gmail through this extension and a native
+helper, because an MV3 worker cannot open IMAP. If you want it:
+
+1. Install Node.js 20 or newer.
+2. Save a Gmail **app password** under **Connections → Gmail** in the workspace
+   (Google requires 2-Step Verification for app passwords).
+3. Install the helper — from a checkout
+   `npm run mail-helper:build && scripts/install-mail-helper.sh` (macOS/Linux)
+   or `.\scripts\install-mail-helper.ps1` (Windows), or from a
+   `synth-mail-helper-*.tgz` release archive. Unpacked/dev installs need
+   `--extension-id <id from chrome://extensions>` because their id is derived
+   from the folder path.
+4. Reload the extension in `chrome://extensions`.
+
+The helper is a separate program that ships **outside** the extension zip: the
+Web Store package contains only `extension-mv3/`. The `nativeMessaging`
+permission itself produces the Chrome install warning "Communicate with
+cooperating native applications"; the helper is registered per user and only
+the extension id in its manifest can launch it. Research still degrades to
+web-only when the helper is absent or the app password is not saved.
 
 A Chrome Web Store listing is planned; the manual install stays available as
 the fallback after it ships. See
@@ -85,6 +113,23 @@ version to the page and reads nothing from it.
 - Provider responses stream back as base64 chunks; the page rebuilds the SSE
   body. The provider key is never written anywhere.
 
+### Gmail research
+
+- The page opens
+  `chrome.runtime.connect(extensionId, { name: 'synth-workspace-mail' })` and
+  sends one `mail` frame with the saved Gmail address, app password, the
+  contact's addresses and the action (`load-contact-mail`, `search` or `read`).
+- The worker checks the pairing token and approved origin, validates the frame,
+  launches `online.synthfit.workspace_mail` over `chrome.runtime.connectNative`,
+  forwards the request without the token, and relays one `mail-result` back.
+- The helper opens `imap.gmail.com:993` read-only for that request, drops the
+  oldest messages until the reply fits Chrome's 1 MiB native-messaging limit,
+  and exits. It never sends, moves, flags or deletes mail and never writes an
+  attachment.
+- The app password is in memory on both sides for the life of the request. It
+  is not written to `chrome.storage`, IndexedDB, localStorage, notifications or
+  a log.
+
 ## Permissions
 
 | Permission | Why |
@@ -93,6 +138,7 @@ version to the page and reads nothing from it.
 | `notifications` | Shows the Allow/Deny prompt when a workspace asks to pair. No other notifications. |
 | `offscreen` | Keeps a provider response stream alive when the worker is suspended. |
 | `debugger` | Runs browser actions through the DevTools Protocol, and supplies tab URLs/titles through `getTargets()` so the `tabs` permission is not needed. |
+| `nativeMessaging` | Launches the Gmail research helper (`online.synthfit.workspace_mail`) when a research request arrives. Only the registered helper for this extension id can be reached; no host permission and no browsing access. |
 | Optional provider origins | Provider fetches, granted on the Options page. The list is the model APIs in `manifest.json`; there is no wildcard. Browser control does not use it. |
 | `bridge-announce.js` content script | Runs only on the workspace origins above and announces the extension id/version. No host permission beyond those three origins. |
 
