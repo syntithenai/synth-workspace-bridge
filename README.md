@@ -25,9 +25,18 @@ and Safari are not supported.
    Chrome briefly attaches the debugger to an http(s) tab and shows a
    "started debugging this browser" banner; it disappears when the test ends.
    Close DevTools on that tab if the test reports it is busy.
-6. Click **Grant provider access**, then **Generate pairing token**.
-7. In Synth Workspace open **Settings → Extension**, paste the extension id and
-   token, and click **Test browser control** there too.
+6. Click **Grant network access** (Chrome asks once for the provider host
+   permission).
+7. Open Synth Workspace, then **Settings → Browser extension**. The page
+   detects the extension and offers **Pair extension**. Click it, then
+   **Allow** on the Chrome notification that names the exact origin. There is
+   no id or token to copy.
+8. Click **Test browser control** in the workspace to confirm the pairing.
+
+Chrome asks to display notifications on first install: it uses them only for
+the Allow/Deny pairing prompt. A self-hosted origin the content script does not
+run on can still pair under **Pair manually** with the extension id and token
+from the Options page.
 
 The extension stays installed across restarts. A Chrome Web Store listing is
 being prepared; the unpacked and release-zip install stays available as the
@@ -66,26 +75,41 @@ Then use `extension-mv3/` as the **Load unpacked** folder from step 4 above.
 
 - The page opens a port named `synth-workspace-model`. The extension declares
   this origin in `externally_connectable`; any other origin is refused.
-- The service worker checks the pairing token and hands each request to an
-  offscreen document, which owns the fetch and the response stream (an MV3
-  worker may be terminated mid-stream).
+- The service worker checks the pairing token and the approved origin, then
+  hands each request to an offscreen document, which owns the fetch and the
+  response stream (an MV3 worker may be terminated mid-stream).
 - Responses stream back as base64 chunks and the page rebuilds the body.
-- `chrome.storage.local` holds only the pairing token. Provider keys are never
-  written there.
+- `chrome.storage.local` holds the pairing token and the origins the user
+  approved (plus a pending pairing request in `chrome.storage.session`, which
+  expires after two minutes). Provider keys are never written there.
+
+### Pairing
+
+`bridge-announce.js` runs on the Workspace origins only and announces the
+extension id and version to the page. A page then asks to pair; the extension
+shows a notification naming that exact origin and nothing is shared until the
+user clicks Allow. Approval is per origin, and both ports also check that the
+connecting origin was approved — the token alone is not enough.
+`externally_connectable` is `https://*/*` so a self-hosted deployment can ask to
+pair; it is a messaging allowlist, not a host permission.
 
 ## Permissions
 
 | Permission | Why |
 |---|---|
-| `storage` | The pairing token. |
+| `storage` | The pairing token and the list of approved origins. |
+| `notifications` | Shows the Allow/Deny prompt when a workspace asks to pair. No other notifications. |
 | `offscreen` | Keeps a provider response stream alive when the worker is suspended. |
 | `debugger` | Runs browser actions through the DevTools Protocol, and supplies tab URLs/titles via `getTargets()` so `tabs` is not needed. |
 | Optional provider origins | Provider fetches, granted by the Options button. The manifest names each supported API; there is no wildcard. Browser control does not use it. |
+| Content script (`bridge-announce.js`) | Runs only on the Workspace origins and announces the id/version. Reads no page content. |
 
 ## Revoking
 
-Options → **Revoke** deletes the pairing token; every open page is refused from
-then on. Generate a new token to pair again.
+Options → **Revoke all** deletes the token and every approved origin; open pages
+are refused from then on. **Rotate token** issues a new token and clears the
+approved origins, so every deployment pairs again. Individual origins can be
+removed from the paired-deployments list.
 
 ## Development
 
@@ -100,10 +124,10 @@ Release:
 
 ```bash
 # bump "version" in extension-mv3/manifest.json first
-git tag v0.3.0
-git push origin v0.3.0
-gh release create v0.3.0 dist/synth-workspace-bridge.zip \
-  --title "Synth Workspace Bridge 0.3.0" \
+git tag v0.4.0
+git push origin v0.4.0
+gh release create v0.4.0 dist/synth-workspace-bridge.zip \
+  --title "Synth Workspace Bridge 0.4.0" \
   --notes "Dev install: download the zip, unzip, then Load unpacked."
 ```
 

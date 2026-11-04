@@ -51,15 +51,24 @@
 
     <h2>1. Pairing</h2>
     <p>
-      The extension stores one thing: a random pairing token in
-      <code>chrome.storage.local</code>. The Workspace stores the same token
-      encrypted on your device and presents it with every request. The token
-      identifies the connection, not you. There is no account, email address, or
-      identity in the extension.
+      The extension stores a random pairing token and the list of Workspace
+      origins you approved in <code>chrome.storage.local</code>. A pairing
+      request that is still waiting for your Allow/Deny answer is kept in
+      <code>chrome.storage.session</code> for two minutes, then discarded. The
+      Workspace stores the token encrypted on your device and presents it with
+      every request. The token identifies the connection, not you. There is no
+      account, email address, or identity in the extension.
     </p>
     <p>
-      Revoking the token on the Options page, or uninstalling the extension,
-      deletes it.
+      To offer one-click pairing, a small content script on the Synth Workspace
+      origins announces the extension's id and version to the page. It reads no
+      page content and modifies nothing. A workspace page then asks to pair, and
+      the extension shows a Chrome notification naming that exact origin.
+      Nothing is shared until you click Allow.
+    </p>
+    <p>
+      Revoking the pairing or uninstalling the extension deletes the token, the
+      approved origin list and any pending request.
     </p>
 
     <h2>2. Browser control</h2>
@@ -77,10 +86,10 @@
       navigate to a URL, open, close, or activate a tab.
     </p>
     <p>
-      That data goes only to the paired Workspace origin —
-      <code>https://suite.synthfit.online</code> or a localhost development
-      origin. The extension does not store page content, and does not send it to
-      the developer or to any third party.
+      That data goes only to a Workspace origin you approved when pairing — the
+      public deployment, a localhost development origin, or your own self-hosted
+      https deployment. The extension does not store page content, and does not
+      send it to the developer or to any third party.
     </p>
     <p>Limits built into the extension:</p>
     <ul>
@@ -129,14 +138,16 @@
 
     <h2>6. Retention</h2>
     <p>
-      The extension retains only the pairing token, until you revoke it or
-      uninstall the extension. It retains no page content, model requests, or
+      The extension retains the pairing token and the approved origin list until
+      you revoke them or uninstall the extension. A pending pairing request is
+      discarded after two minutes. It retains no page content, model requests, or
       provider keys.
     </p>
 
     <h2>7. Your controls</h2>
     <ul>
-      <li><strong>Revoke pairing:</strong> Options page → Revoke. Every page is refused immediately.</li>
+      <li><strong>Revoke pairing:</strong> Options page → <strong>Revoke all</strong>. Every page is refused immediately. <strong>Rotate token</strong> issues a new token and clears the approved origins; <strong>Remove</strong> next to an origin withdraws just that deployment.</li>
+      <li><strong>Unpair in the workspace:</strong> also asks the extension to drop that origin.</li>
       <li><strong>Revoke provider access:</strong> <code>chrome://extensions</code> → Details → Site access, or uninstall the extension.</li>
       <li><strong>Remove everything:</strong> uninstalling the extension deletes its storage.</li>
     </ul>

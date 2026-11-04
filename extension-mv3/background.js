@@ -20,14 +20,24 @@
  * execute arbitrary code. That keeps the extension within the Web Store's
  * remote-code rules and keeps review focused on the fixed action set.
  *
- * Both ports require the token stored by the options page. A page at another
- * origin cannot open the port because of `externally_connectable`, and a page
- * at an allowed origin still has to know the token.
+ * Both ports require the token stored by the options page *and* an origin the
+ * user approved when pairing. `externally_connectable` lets any https page ask
+ * to pair, but only an approved origin receives the token, and the token only
+ * works from an approved origin. The pairing prompt is the gate; the token is
+ * what the approved page uses on every later connection.
  */
 
 const MODEL_PORT_NAME = 'synth-workspace-model'
 const BROWSER_PORT_NAME = 'synth-workspace-browser'
 const DEBUG_PROTOCOL_VERSION = '1.3'
+
+const PAIR_PROTOCOL_VERSION = 1
+const PAIR_REQUESTS_KEY = 'pairRequests'
+const PAIR_NOTIFICATION_PREFIX = 'synth-pair:'
+/** How long an unanswered Allow/Deny prompt stays valid. */
+const PAIR_REQUEST_TTL_MS = 2 * 60_000
+/** A page cannot stack unbounded prompts while the user ignores them. */
+const MAX_PENDING_PAIRS = 5
 
 /** id -> port, so model stream events can find the page that asked. */
 const jobs = new Map()
@@ -87,11 +97,279 @@ function post(port, message) {
 
 /* --------------------------------------------------------------------------
  * Pairing
+ *
+ * One token per install, plus the list of origins the user approved. A web
+ * page announces itself through `bridge-announce.js`, sends `pair.request`, and
+ * receives the token only after the user clicks Allow on a Chrome notification.
+ * Every port connection is checked against both the token and the origin list.
+ *
+ * All pending state lives in session storage, because the worker is torn down
+ * while the notification sits unanswered; the button click revives a fresh
+ * worker with no in-memory state.
  * ------------------------------------------------------------------------ */
 
 async function pairingToken() {
   const { pairingToken } = await chrome.storage.local.get('pairingToken')
   return typeof pairingToken === 'string' ? pairingToken : undefined
+}
+
+async function ensurePairingToken() {
+  const current = await pairingToken()
+  if (current) return current
+  const token = crypto.randomUUID() + crypto.randomUUID()
+  await chrome.storage.local.set({ pairingToken: token })
+  return token
+}
+
+async function readPairedOrigins() {
+  const { pairedOrigins } = await chrome.storage.local.get('pairedOrigins')
+  return Array.isArray(pairedOrigins)
+    ? pairedOrigins.filter((origin) => typeof origin === 'string')
+    : undefined
+}
+
+/** Serializes read-modify-write of the origin list and pending requests. */
+let pairQueue = Promise.resolve()
+function withPairStore(task) {
+  const run = pairQueue.then(task, task)
+  pairQueue = run.catch(() => undefined)
+  return run
+}
+
+/**
+ * Only exact https origins and loopback http origins may pair. `sender.origin`
+ * is browser-supplied, but normalize anyway so a trailing slash or a case
+ * difference cannot bypass the stored list.
+ */
+function normalizeOrigin(raw) {
+  if (typeof raw !== 'string' || !raw) return undefined
+  try {
+    const url = new URL(raw)
+    if (url.protocol === 'https:') return url.origin
+    if (
+      url.protocol === 'http:' &&
+      (url.hostname === 'localhost' ||
+        url.hostname === '127.0.0.1' ||
+        url.hostname === '[::1]')
+    ) {
+      return url.origin
+    }
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
+function pairError(code, message) {
+  return { ok: false, status: 'error', code, message }
+}
+
+async function readPairRequests() {
+  try {
+    const { pairRequests } = await chrome.storage.session.get(PAIR_REQUESTS_KEY)
+    return pairRequests && typeof pairRequests === 'object' ? pairRequests : {}
+  } catch {
+    return {}
+  }
+}
+
+/** Drops requests older than the TTL; an approved entry only has to outlive the page's poll. */
+async function writePairRequests(requests) {
+  const now = Date.now()
+  const kept = {}
+  for (const [id, request] of Object.entries(requests)) {
+    if (!request || typeof request.createdAt !== 'number') continue
+    if (now - request.createdAt < PAIR_REQUEST_TTL_MS) kept[id] = request
+  }
+  try {
+    await chrome.storage.session.set({ [PAIR_REQUESTS_KEY]: kept })
+  } catch {
+    // Without session storage the request is simply unanswerable and expires.
+  }
+  return kept
+}
+
+async function originApproved(origin) {
+  if (!origin) return false
+  const origins = await readPairedOrigins()
+  return Array.isArray(origins) && origins.includes(origin)
+}
+
+/**
+ * Ports accept a connection when the token matches and the origin was approved
+ * (or, for a pre-0.4.0 pairing that has a token but no origin list, on first
+ * use — the origin is then recorded, so later connections are checked).
+ */
+async function portAllowed(origin, token) {
+  const stored = await pairingToken()
+  if (!stored || token !== stored) return false
+  const origins = await readPairedOrigins()
+  if (origins === undefined) {
+    if (!origin) return false
+    await chrome.storage.local.set({ pairedOrigins: [origin], originsMigrated: true })
+    return true
+  }
+  return Boolean(origin) && origins.includes(origin)
+}
+
+async function showPairPrompt(request) {
+  try {
+    await chrome.notifications.create(request.notificationId, {
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: 'Pair Synth Workspace?',
+      // Only the origin, never text from the page.
+      message: `${request.origin} wants to send model requests and control tabs through this extension.`,
+      contextMessage: 'Only approve a workspace you opened yourself.',
+      buttons: [{ title: 'Allow' }, { title: 'Deny' }],
+      requireInteraction: true,
+    })
+  } catch {
+    // Notifications can be disabled by the OS or by Chrome policy. Fall back to
+    // the Options page, which needs no extra permission.
+    try {
+      await chrome.tabs.create({
+        url: `${chrome.runtime.getURL('options.html')}#pair=${encodeURIComponent(request.requestId)}`,
+      })
+    } catch {
+      // Nothing else to try; the page reports that no prompt appeared.
+    }
+  }
+}
+
+async function handlePairRequest(origin) {
+  if (!origin) return pairError('invalid_origin', 'Pairing must start from an https workspace.')
+  const existingToken = await pairingToken()
+  if (existingToken && (await originApproved(origin))) {
+    return { ok: true, status: 'approved', token: existingToken }
+  }
+  return withPairStore(async () => {
+    const requests = await readPairRequests()
+    const now = Date.now()
+    const sameOrigin = Object.entries(requests).find(
+      ([, request]) =>
+        request.origin === origin &&
+        request.status === 'pending' &&
+        now - request.createdAt < PAIR_REQUEST_TTL_MS,
+    )
+    if (sameOrigin) return { ok: true, status: 'pending', requestId: sameOrigin[0] }
+
+    const live = Object.values(requests).filter(
+      (request) => request.status === 'pending' && now - request.createdAt < PAIR_REQUEST_TTL_MS,
+    ).length
+    if (live >= MAX_PENDING_PAIRS) {
+      return pairError('pairing_busy', 'Too many pairing prompts are waiting in Chrome.')
+    }
+
+    const requestId = crypto.randomUUID()
+    const request = {
+      requestId,
+      origin,
+      createdAt: now,
+      status: 'pending',
+      notificationId: PAIR_NOTIFICATION_PREFIX + requestId,
+    }
+    requests[requestId] = request
+    await writePairRequests(requests)
+    await showPairPrompt(request)
+    return { ok: true, status: 'pending', requestId }
+  })
+}
+
+async function handlePairStatus(requestId, origin) {
+  if (!origin) return pairError('invalid_origin', 'Pairing must start from an https workspace.')
+  return withPairStore(async () => {
+    const requests = await readPairRequests()
+    const request = typeof requestId === 'string' ? requests[requestId] : undefined
+    // Binding the request to the asking origin means a leaked id cannot fetch
+    // another deployment's token.
+    if (!request || request.origin !== origin) {
+      return pairError('unknown_request', 'No pairing request for this origin.')
+    }
+    if (request.status === 'approved') {
+      const token = await pairingToken()
+      if (!token) return { ok: true, status: 'expired' }
+      if (!(await originApproved(origin))) return { ok: true, status: 'revoked' }
+      return { ok: true, status: 'approved', token }
+    }
+    if (request.status === 'denied') return { ok: true, status: 'denied' }
+    if (Date.now() - request.createdAt >= PAIR_REQUEST_TTL_MS) {
+      request.status = 'expired'
+      await writePairRequests(requests)
+      return { ok: true, status: 'expired' }
+    }
+    return { ok: true, status: 'pending', requestId: request.requestId }
+  })
+}
+
+async function handlePairClaim(token, origin) {
+  if (!origin) return pairError('invalid_origin', 'Pairing must start from an https workspace.')
+  const stored = await pairingToken()
+  if (!stored || token !== stored) {
+    return pairError('not_paired', 'The pairing token does not match this extension.')
+  }
+  return withPairStore(async () => {
+    const origins = (await readPairedOrigins()) || []
+    if (!origins.includes(origin)) {
+      origins.push(origin)
+      await chrome.storage.local.set({ pairedOrigins: origins })
+    }
+    return { ok: true, status: 'claimed' }
+  })
+}
+
+async function handlePairRevoke(origin) {
+  if (!origin) return pairError('invalid_origin', 'Pairing must start from an https workspace.')
+  return withPairStore(async () => {
+    const origins = (await readPairedOrigins()) || []
+    await chrome.storage.local.set({ pairedOrigins: origins.filter((item) => item !== origin) })
+    return { ok: true, status: 'revoked' }
+  })
+}
+
+/**
+ * Applies an Allow/Deny decision. The token is created here — never on a bare
+ * request — so no page can mint a token without consent. Token and origin list
+ * are written before the request is marked approved, so a worker that dies
+ * halfway never reports success.
+ */
+async function applyPairDecision(requestId, allow) {
+  return withPairStore(async () => {
+    const requests = await readPairRequests()
+    const request = typeof requestId === 'string' ? requests[requestId] : undefined
+    if (!request) return pairError('unknown_request', 'That pairing prompt is no longer valid.')
+    if (request.status !== 'pending') {
+      return { ok: true, status: request.status }
+    }
+    if (Date.now() - request.createdAt >= PAIR_REQUEST_TTL_MS) {
+      request.status = 'expired'
+      await writePairRequests(requests)
+      return { ok: true, status: 'expired' }
+    }
+    if (!allow) {
+      request.status = 'denied'
+      await writePairRequests(requests)
+      return { ok: true, status: 'denied' }
+    }
+    const token = await ensurePairingToken()
+    const origins = (await readPairedOrigins()) || []
+    if (!origins.includes(request.origin)) origins.push(request.origin)
+    await chrome.storage.local.set({ pairingToken: token, pairedOrigins: origins })
+    request.status = 'approved'
+    await writePairRequests(requests)
+    return { ok: true, status: 'approved' }
+  })
+}
+
+/** A dismissed prompt is a denial, but only while it is still pending. */
+async function settleClosedPrompt(requestId) {
+  return withPairStore(async () => {
+    const requests = await readPairRequests()
+    const request = typeof requestId === 'string' ? requests[requestId] : undefined
+    if (!request || request.status !== 'pending') return
+    request.status = 'denied'
+    await writePairRequests(requests)
+  })
 }
 
 /* --------------------------------------------------------------------------
@@ -599,11 +877,10 @@ async function runBrowserAction(action, params) {
  * Ports
  * ------------------------------------------------------------------------ */
 
-function modelPort(port) {
+function modelPort(port, origin) {
   port.onMessage.addListener(async (message) => {
     if (!message || message.type !== 'http' || typeof message.id !== 'string') return
-    const token = await pairingToken()
-    if (!token || message.token !== token) {
+    if (!(await portAllowed(origin, message.token))) {
       fail(port, message.id, 'extension_unavailable', 'This page is not paired.')
       return
     }
@@ -646,11 +923,10 @@ function enqueueBrowser(task) {
   return run
 }
 
-function browserPort(port) {
+function browserPort(port, origin) {
   port.onMessage.addListener(async (message) => {
     if (!message || message.type !== 'browser' || typeof message.id !== 'string') return
-    const token = await pairingToken()
-    if (!token || message.token !== token) {
+    if (!(await portAllowed(origin, message.token))) {
       post(port, {
         type: 'browser-result',
         id: message.id,
@@ -676,12 +952,115 @@ function browserPort(port) {
 }
 
 chrome.runtime.onConnectExternal.addListener((port) => {
-  if (port.name === MODEL_PORT_NAME) modelPort(port)
-  else if (port.name === BROWSER_PORT_NAME) browserPort(port)
+  // `sender` is browser-supplied for external ports; never trust the page.
+  const origin = normalizeOrigin(port.sender && port.sender.origin)
+  if (port.name === MODEL_PORT_NAME) modelPort(port, origin)
+  else if (port.name === BROWSER_PORT_NAME) browserPort(port, origin)
 })
 
-chrome.runtime.onMessage.addListener((message) => {
-  if (!message || message.target !== 'background' || message.type !== 'proxy-event') return
+function handleExternalMessage(message, origin) {
+  if (!message || message.version !== PAIR_PROTOCOL_VERSION) {
+    return pairError('extension_unavailable', 'This page speaks a different pairing protocol.')
+  }
+  switch (message.type) {
+    case 'pair.request':
+      return handlePairRequest(origin)
+    case 'pair.status':
+      return handlePairStatus(message.requestId, origin)
+    case 'pair.claim':
+      return handlePairClaim(message.token, origin)
+    case 'pair.revoke':
+      return handlePairRevoke(origin)
+    default:
+      return pairError('extension_unavailable', 'Unknown pairing message.')
+  }
+}
+
+chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  // Pairing must start from the top-level page, not a third-party iframe.
+  if (sender && sender.frameId !== undefined && sender.frameId !== 0) {
+    sendResponse(pairError('invalid_origin', 'Pairing must start from the top-level page.'))
+    return false
+  }
+  const origin = normalizeOrigin(sender && sender.origin)
+  if (!origin) {
+    sendResponse(pairError('invalid_origin', 'Pairing must start from an https workspace.'))
+    return false
+  }
+  handleExternalMessage(message, origin).then(
+    sendResponse,
+    () => sendResponse(pairError('extension_unavailable', 'The extension could not answer.')),
+  )
+  return true
+})
+
+function clearPairNotification(notificationId) {
+  try {
+    void chrome.notifications.clear(notificationId).catch(() => undefined)
+  } catch {
+    // Already gone or unsupported in this build.
+  }
+}
+
+chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
+  if (typeof notificationId !== 'string' || !notificationId.startsWith(PAIR_NOTIFICATION_PREFIX)) {
+    return
+  }
+  const requestId = notificationId.slice(PAIR_NOTIFICATION_PREFIX.length)
+  void applyPairDecision(requestId, buttonIndex === 0).finally(() => {
+    clearPairNotification(notificationId)
+  })
+})
+
+chrome.notifications.onClosed.addListener((notificationId) => {
+  if (typeof notificationId !== 'string' || !notificationId.startsWith(PAIR_NOTIFICATION_PREFIX)) {
+    return
+  }
+  // A dismissed prompt is a denial. Already-decided prompts are ignored.
+  void settleClosedPrompt(notificationId.slice(PAIR_NOTIFICATION_PREFIX.length))
+})
+
+/** Only this extension's own pages may decide or inspect a pairing prompt. */
+function isExtensionPage(sender) {
+  return Boolean(
+    sender &&
+      sender.id === chrome.runtime.id &&
+      String(sender.url || '').startsWith(chrome.runtime.getURL('')),
+  )
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || message.target !== 'background') return
+  if (message.type === 'pair.inspect') {
+    // Options-page fallback only; never answer a content script with the origin.
+    if (!isExtensionPage(sender)) {
+      sendResponse({ ok: false })
+      return false
+    }
+    readPairRequests().then((requests) => {
+      const request = requests[message.requestId]
+      sendResponse(
+        request
+          ? { ok: true, status: request.status, origin: request.origin }
+          : { ok: false },
+      )
+    })
+    return true
+  }
+  if (message.type === 'pair.decide') {
+    // Options-page fallback when OS notifications are unavailable.
+    if (!isExtensionPage(sender)) {
+      sendResponse(pairError('invalid_origin', 'Only the extension page can decide a pairing.'))
+      return false
+    }
+    const requestId = typeof message.requestId === 'string' ? message.requestId : ''
+    applyPairDecision(requestId, Boolean(message.allow)).then((result) => {
+      clearPairNotification(PAIR_NOTIFICATION_PREFIX + requestId)
+      sendResponse(result)
+    })
+    return true
+  }
+  if (message.type !== 'proxy-event') return
   const event = message.event
   if (!event || typeof event.id !== 'string') return
   const port = jobs.get(event.id)

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Synth Workspace Bridge",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Lets Synth Workspace drive your own browser and stream BYOK model calls through it, so provider keys never reach a server.",
   "minimum_chrome_version": "116",
   "icons": {
@@ -13,7 +13,7 @@
   "background": {
     "service_worker": "background.js"
   },
-  "permissions": ["storage", "offscreen", "debugger"],
+  "permissions": ["storage", "offscreen", "debugger", "notifications"],
   "optional_host_permissions": [
     "https://api.anthropic.com/*",
     "https://api.openai.com/*",
@@ -71,8 +71,22 @@
     "http://127.0.0.1/*"
   ],
   "externally_connectable": {
-    "matches": ["https://suite.synthfit.online/*", "http://localhost/*", "http://127.0.0.1/*"]
+    "matches": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"]
   },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://suite.synthfit.online/*",
+        "https://localhost/*",
+        "https://127.0.0.1/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": ["bridge-announce.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
   "options_page": "options.html",
   "action": {
     "default_title": "Synth Workspace Bridge",

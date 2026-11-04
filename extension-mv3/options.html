@@ -17,6 +17,10 @@
       ul { margin: 8px 0 0; padding-left: 20px; color: #48484a; }
       #browser-status.ok { color: #1a7f37; }
       #browser-status.error { color: #c62828; }
+      .pair-request { border-color: #007aff; background: #f5f9ff; margin-top: 12px; }
+      .origins { list-style: none; padding: 0; }
+      .origins li { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+      .origins code, .origins span { word-break: break-all; }
     </style>
   </head>
   <body>
@@ -69,16 +73,38 @@
     <section>
       <strong>3. Pair with the workspace</strong>
       <p class="muted">
-        Paste the extension id and token into Settings → Browser extension in
-        Synth Workspace. Pairing is one-time; regenerate to revoke old pages.
+        Open Synth Workspace, then Settings → Browser extension → Pair extension.
+        Chrome asks whether to allow that origin; the token is created
+        automatically on the first approval. You can remove an approved origin
+        here at any time. The id and token below are only needed for a
+        self-hosted origin the extension does not announce itself on.
       </p>
-      <div class="row"><span>Extension id</span> <code id="extension-id"></code></div>
-      <div class="row"><span>Pairing token</span> <code id="token">— none —</code></div>
+
+      <div id="pair-request" class="pair-request" hidden>
+        <strong>Pairing request</strong>
+        <p id="pair-origin" class="muted"></p>
+        <div class="row">
+          <button id="pair-allow">Allow</button>
+          <button id="pair-deny" class="secondary">Deny</button>
+        </div>
+      </div>
+
       <div class="row">
-        <button id="generate">Generate pairing token</button>
-        <button id="revoke" class="secondary">Revoke</button>
+        <span>Extension id</span> <code id="extension-id"></code>
+        <button id="copy-id" class="secondary">Copy</button>
+      </div>
+      <div class="row">
+        <span>Pairing token</span> <code id="token">— none —</code>
+        <button id="copy-token" class="secondary">Copy</button>
+      </div>
+      <div class="row">
+        <button id="generate">Rotate token</button>
+        <button id="revoke" class="secondary">Revoke all</button>
       </div>
       <p id="saved" class="muted"></p>
+
+      <div class="row"><span>Paired deployments</span></div>
+      <ul id="paired-origins" class="origins"></ul>
     </section>
 
     <p class="muted" style="margin-top: 24px">
